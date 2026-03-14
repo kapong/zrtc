@@ -33,7 +33,7 @@ worker-dev: ## Run worker locally (wrangler dev)
 	cd $(WORKER_DIR) && npx wrangler dev
 
 worker-deploy: worker-build ## Deploy worker to Cloudflare
-	cd $(WORKER_DIR) && npx wrangler deploy
+	cd $(WORKER_DIR) && CLOUDFLARE_ACCOUNT_ID=$(CLOUDFLARE_ACCOUNT_ID) npx wrangler deploy
 
 worker-clean: ## Clean worker build artifacts
 	cd $(WORKER_DIR) && cargo clean && rm -rf build/

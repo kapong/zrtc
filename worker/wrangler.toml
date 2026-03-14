@@ -1,7 +1,6 @@
 name = "zrtc"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-01-01"
-account_id = "bd38b976bde402a8c196fbaba5f66abe"
 
 [build]
 command = "cargo install worker-build && worker-build --release"

@@ -1,6 +1,6 @@
 {
   "name": "@kapong/zrtc",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Anonymous one-time P2P WebRTC connections via Cloudflare Workers",
   "type": "module",
   "main": "dist/zrtc.js",
@@ -13,7 +13,6 @@
   },
   "files": [
     "dist/",
-    "src/",
     "README.md",
     "LICENSE"
   ],

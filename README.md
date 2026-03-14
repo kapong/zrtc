@@ -207,6 +207,12 @@ POST /new
 
 ---
 
+## Acknowledgements
+
+Inspired by [p2pcf](https://github.com/gfodor/p2pcf) by [@gfodor](https://github.com/gfodor) — a clever approach to serverless WebRTC signalling using Cloudflare Workers.
+
+---
+
 ## License
 
 MIT

@@ -1,6 +1,6 @@
 {
   "name": "@kapong/zrtc",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Anonymous one-time P2P WebRTC connections via Cloudflare Workers",
   "type": "module",
   "main": "dist/zrtc.js",
@@ -28,7 +28,13 @@
   "devDependencies": {
     "esbuild": "^0.25.0"
   },
-  "keywords": ["p2p", "webrtc", "anonymous", "cloudflare-workers", "signalling"],
+  "keywords": [
+    "p2p",
+    "webrtc",
+    "anonymous",
+    "cloudflare-workers",
+    "signalling"
+  ],
   "license": "MIT",
   "publishConfig": {
     "access": "public"

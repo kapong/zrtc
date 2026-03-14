@@ -1,22 +1,18 @@
 name = "zrtc"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-01-01"
+account_id = "bd38b976bde402a8c196fbaba5f66abe"
 
 [build]
 command = "cargo install worker-build && worker-build --release"
 
-# Uncomment and fill in before deploying:
-# account_id = ""
-# workers_dev = true
-#
-# [[routes]]
-# pattern = "your-domain.com"
-# custom_domain = true
-#
-# [[r2_buckets]]
-# binding = "BUCKET"
-# bucket_name = "zrtc"
-# preview_bucket_name = "zrtc-dev"
+[[routes]]
+pattern = "relay.zrtc.to"
+custom_domain = true
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "zrtc"
 
 [vars]
 TOKEN_LENGTH_DEFAULT = "8"

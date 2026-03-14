@@ -5,3 +5,7 @@ dist
 .DEV_INFO.md
 
 legacy/
+
+# Wrangler
+.wrangler/
+worker/.wrangler/

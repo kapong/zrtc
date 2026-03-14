@@ -65,7 +65,7 @@ example-dev: example-install ## Run example dev server
 	cd $(EXAMPLE_DIR) && VITE_WORKER_URL=https://$(WORKER_DOMAIN) npm run dev
 
 example-deploy: example-build ## Deploy example to Cloudflare Pages
-	cd $(EXAMPLE_DIR) && npx wrangler pages deploy dist/ --project-name=$(PAGES_PROJECT) --branch=main
+	cd $(EXAMPLE_DIR) && CLOUDFLARE_ACCOUNT_ID=$(CLOUDFLARE_ACCOUNT_ID) npx wrangler pages deploy dist/ --project-name=$(PAGES_PROJECT) --branch=main
 
 example-clean: ## Clean example build artifacts
 	rm -rf $(EXAMPLE_DIR)/dist $(EXAMPLE_DIR)/node_modules

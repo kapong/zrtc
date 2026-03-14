@@ -29,5 +29,8 @@
     "esbuild": "^0.25.0"
   },
   "keywords": ["p2p", "webrtc", "anonymous", "cloudflare-workers", "signalling"],
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }

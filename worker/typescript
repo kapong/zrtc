@@ -1,0 +1,58 @@
+Script started on Sat Mar 14 17:27:55 2026
+[1m[7m%[27m[1m[0m                                                                                ]2;kapong@Kapong-MBA:~/workspace/lab/p2pcf/worker]1;../p2pcf/worker]7;file://Kapong-MBA.local/Users/kapong/workspace/lab/p2pcf/worker\[0m[27m[24m[J[01;32m➜  [36mworker[00m [K[?1h=[?2004h[0m[27m[24m[J[01;32m➜  [36mworker[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?2004l
+[1m[7m%[27m[1m[0m                                                                                ]2;kapong@Kapong-MBA:~/workspace/lab/p2pcf/worker]1;../p2pcf/worker]7;file://Kapong-MBA.local/Users/kapong/workspace/lab/p2pcf/worker\[0m[27m[24m[J[01;31m➜  [36mworker[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004h  python3 /tmp/cleanup_r2.py[?1l>[?2004l
+]2;python3 /tmp/cleanup_r2.py]1;python3=== Emptying p2pcall ===
+  DELETE channels/EsZiHyke/caller.json → 200
+  DELETE channels/EsZiHyke/meta.json → 200
+^CTraceback (most recent call last):
+  File [35m"/tmp/cleanup_r2.py"[0m, line [35m48[0m, in [35m<module>[0m
+    [31mempty_bucket[0m[1;31m(bucket)[0m
+    [31m~~~~~~~~~~~~[0m[1;31m^^^^^^^^[0m
+  File [35m"/tmp/cleanup_r2.py"[0m, line [35m40[0m, in [35mempty_bucket[0m
+    s, _ = [31mcf_request[0m[1;31m("DELETE", f"/{bucket}/objects/{encoded}")[0m
+           [31m~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/tmp/cleanup_r2.py"[0m, line [35m21[0m, in [35mcf_request[0m
+    with [31murllib.request.urlopen[0m[1;31m(req)[0m as r:
+         [31m~~~~~~~~~~~~~~~~~~~~~~[0m[1;31m^^^^^[0m
+  File [35m"/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py"[0m, line [35m187[0m, in [35murlopen[0m
+    return [31mopener.open[0m[1;31m(url, data, timeout)[0m
+           [31m~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py"[0m, line [35m487[0m, in [35mopen[0m
+    response = self._open(req, data)
+  File [35m"/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py"[0m, line [35m504[0m, in [35m_open[0m
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File [35m"/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py"[0m, line [35m464[0m, in [35m_call_chain[0m
+    result = func(*args)
+  File [35m"/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py"[0m, line [35m1369[0m, in [35mhttps_open[0m
+    return [31mself.do_open[0m[1;31m(http.client.HTTPSConnection, req,[0m
+           [31m~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+                        [1;31mcontext=self._context)[0m
+                        [1;31m^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py"[0m, line [35m1325[0m, in [35mdo_open[0m
+    r = h.getresponse()
+  File [35m"/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py"[0m, line [35m1450[0m, in [35mgetresponse[0m
+    [31mresponse.begin[0m[1;31m()[0m
+    [31m~~~~~~~~~~~~~~[0m[1;31m^^[0m
+  File [35m"/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py"[0m, line [35m336[0m, in [35mbegin[0m
+    version, status, reason = [31mself._read_status[0m[1;31m()[0m
+                              [31m~~~~~~~~~~~~~~~~~[0m[1;31m^^[0m
+  File [35m"/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py"[0m, line [35m297[0m, in [35m_read_status[0m
+    line = str([31mself.fp.readline[0m[1;31m(_MAXLINE + 1)[0m, "iso-8859-1")
+               [31m~~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^[0m
+  File [35m"/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py"[0m, line [35m725[0m, in [35mreadinto[0m
+    return [31mself._sock.recv_into[0m[1;31m(b)[0m
+           [31m~~~~~~~~~~~~~~~~~~~~[0m[1;31m^^^[0m
+  File [35m"/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py"[0m, line [35m1304[0m, in [35mrecv_into[0m
+    return [31mself.read[0m[1;31m(nbytes, buffer)[0m
+           [31m~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^[0m
+  File [35m"/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py"[0m, line [35m1138[0m, in [35mread[0m
+    return [31mself._sslobj.read[0m[1;31m(len, buffer)[0m
+           [31m~~~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^[0m
+[1;35mKeyboardInterrupt[0m
+
+[1m[7m%[27m[1m[0m                                                                                ]2;kapong@Kapong-MBA:~/workspace/lab/p2pcf/worker]1;../p2pcf/worker]7;file://Kapong-MBA.local/Users/kapong/workspace/lab/p2pcf/worker\[0m[27m[24m[J[01;31m➜  [36mworker[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004h  echo "waiting for cleanup..."[?1l>[?2004l
+]2;echo "waiting for cleanup..."]1;echowaiting for cleanup...
+[1m[7m%[27m[1m[0m                                                                                ]2;kapong@Kapong-MBA:~/workspace/lab/p2pcf/worker]1;../p2pcf/worker]7;file://Kapong-MBA.local/Users/kapong/workspace/lab/p2pcf/worker\[0m[27m[24m[J[01;32m➜  [36mworker[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004h[?2004l
+[1m[7m%[27m[1m[0m                                                                                ]2;kapong@Kapong-MBA:~/workspace/lab/p2pcf/worker]1;../p2pcf/worker]7;file://Kapong-MBA.local/Users/kapong/workspace/lab/p2pcf/worker\[0m[27m[24m[J[01;31m➜  [36mworker[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004h  python3 /tmp/cleanup_r2.py > /tmp/cleanup_r2.log 2>&1 &a [Kmmp; echo "PID: $!"[?1l>[?2004l
+[0m[27m[24m[Jdquote> [K[?1h=[?2004h

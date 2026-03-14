@@ -1,0 +1,32 @@
+name = "zrtc"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-01-01"
+
+[build]
+command = "cargo install worker-build && worker-build --release"
+
+# Uncomment and fill in before deploying:
+# account_id = ""
+# workers_dev = true
+#
+# [[routes]]
+# pattern = "your-domain.com"
+# custom_domain = true
+#
+# [[r2_buckets]]
+# binding = "BUCKET"
+# bucket_name = "zrtc"
+# preview_bucket_name = "zrtc-dev"
+
+[vars]
+TOKEN_LENGTH_DEFAULT = "8"
+TOKEN_LENGTH_MIN = "6"
+TOKEN_LENGTH_MAX = "32"
+PASSCODE_LENGTH_DEFAULT = "6"
+PASSCODE_LENGTH_MIN = "4"
+PASSCODE_LENGTH_MAX = "8"
+CHANNEL_TTL_CREATED = "300"
+CHANNEL_TTL_WAITING = "300"
+CHANNEL_TTL_LOCKED = "3600"
+MAX_PASSCODE_ATTEMPTS = "5"
+MAX_PARTICIPANTS = "1"

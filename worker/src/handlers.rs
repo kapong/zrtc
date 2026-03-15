@@ -43,32 +43,36 @@ fn now_ms() -> u64 {
     js_sys::Date::now() as u64
 }
 
-fn cors_headers() -> Headers {
+fn allowed_origin(env: &Env) -> String {
+    env.var("ALLOWED_ORIGIN")
+        .ok()
+        .map(|v| v.to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "*".to_string())
+}
+
+fn cors_headers(origin: &str) -> Headers {
     let h = Headers::new();
-    h.set("Access-Control-Allow-Origin", "*").ok();
+    h.set("Access-Control-Allow-Origin", origin).ok();
     h.set("Content-Type", "application/json").ok();
     h
 }
 
-fn json_response(status: u16, body: serde_json::Value) -> Result<Response> {
-    let mut resp = Response::from_json(&body)?;
-    let headers = resp.headers_mut();
-    headers.set("Access-Control-Allow-Origin", "*")?;
-    // worker crate doesn't support setting status directly on from_json,
-    // so we recreate with correct status
+fn json_response(status: u16, body: serde_json::Value, env: &Env) -> Result<Response> {
+    let origin = allowed_origin(env);
     Ok(Response::builder()
         .with_status(status)
-        .with_headers(cors_headers())
+        .with_headers(cors_headers(&origin))
         .body(worker::ResponseBody::Body(serde_json::to_vec(&body).unwrap()))
     )
 }
 
-fn ok_json(body: serde_json::Value) -> Result<Response> {
-    json_response(200, body)
+fn ok_json(body: serde_json::Value, env: &Env) -> Result<Response> {
+    json_response(200, body, env)
 }
 
-fn err_json(status: u16, error: &str, message: &str) -> Result<Response> {
-    json_response(status, json!({ "error": error, "message": message }))
+fn err_json(status: u16, error: &str, message: &str, env: &Env) -> Result<Response> {
+    json_response(status, json!({ "error": error, "message": message }), env)
 }
 
 /// Verify passcode, incrementing attempts on failure.
@@ -116,17 +120,17 @@ pub async fn handle_new(
     let pass_len = body.passcode_length.unwrap_or(pass_default);
 
     if token_len < token_min || token_len > token_max {
-        return err_json(400, "invalid_token_length", &format!("token_length must be {}-{}", token_min, token_max));
+        return err_json(400, "invalid_token_length", &format!("token_length must be {}-{}", token_min, token_max), env);
     }
     if pass_len < pass_min || pass_len > pass_max {
-        return err_json(400, "invalid_passcode_length", &format!("passcode_length must be {}-{}", pass_min, pass_max));
+        return err_json(400, "invalid_passcode_length", &format!("passcode_length must be {}-{}", pass_min, pass_max), env);
     }
 
     // Generate or validate custom token
     let channel_id = match custom_token {
         Some(t) => {
             if t.len() < token_min || t.len() > token_max {
-                return err_json(400, "invalid_token_length", &format!("Custom token must be {}-{} chars", token_min, token_max));
+                return err_json(400, "invalid_token_length", &format!("Custom token must be {}-{} chars", token_min, token_max), env);
             }
             t
         }
@@ -135,7 +139,7 @@ pub async fn handle_new(
 
     // Check for duplicate
     if (storage::read_meta(&bucket, &channel_id).await?).is_some() {
-        return err_json(409, "channel_id_exists", "This channel ID already exists.");
+        return err_json(409, "channel_id_exists", "This channel ID already exists.", env);
     }
 
     // Generate passcode + hash
@@ -164,7 +168,7 @@ pub async fn handle_new(
         "passcode": passcode,
         "created_at": now,
         "expires_at": meta.expires_at
-    }))
+    }), env)
 }
 
 /// POST /listen
@@ -174,32 +178,38 @@ pub async fn handle_listen(mut req: Request, env: &Env, _ctx: &Context) -> Resul
 
     let mut meta = match storage::read_meta(&bucket, &body.channel_id).await? {
         Some(m) => m,
-        None => return err_json(404, "channel_not_found", "Channel does not exist."),
+        None => return err_json(404, "channel_not_found", "Channel does not exist.", env),
     };
 
     // Check expiry
     if now_ms() > meta.expires_at {
-        return err_json(410, "channel_expired", "Channel has expired.");
+        return err_json(410, "channel_expired", "Channel has expired.", env);
     }
 
     // Verify passcode
     if !verify_passcode(&bucket, &body.channel_id, &mut meta, &body.passcode).await? {
         if meta.passcode_attempts >= meta.max_passcode_attempts {
-            return err_json(403, "passcode_locked", "Too many wrong attempts.");
+            return err_json(403, "passcode_locked", "Too many wrong attempts.", env);
         }
-        return err_json(401, "invalid_passcode", "Invalid passcode.");
+        return err_json(401, "invalid_passcode", "Invalid passcode.", env);
     }
 
     // Check state
     if meta.state != storage::STATE_CREATED {
-        return err_json(409, "invalid_state", &format!("Channel is in {} state, expected CREATED.", meta.state));
+        return err_json(409, "invalid_state", &format!("Channel is in {} state, expected CREATED.", meta.state), env);
     }
 
-    // Store callee signal (opaque)
-    let signal_str = match &body.signal {
-        Some(s) => serde_json::to_string(s).unwrap_or_default(),
-        None => return err_json(400, "missing_signal", "Signal data is required."),
+    // Validate + store callee signal
+    let signal = match &body.signal {
+        Some(s) => s,
+        None => return err_json(400, "missing_signal", "Signal data is required.", env),
     };
+    let max_signal_bytes = env_var_usize(env, "MAX_SIGNAL_BYTES", 65536);
+    if let Some((code, msg)) = validate_signal(signal, max_signal_bytes) {
+        let status = if code == "signal_too_large" { 413 } else { 400 };
+        return err_json(status, code, msg, env);
+    }
+    let signal_str = serde_json::to_string(signal).unwrap_or_default();
     storage::write_signal(&bucket, &body.channel_id, "callee", &signal_str).await?;
 
     // Transition CREATED → WAITING
@@ -211,7 +221,7 @@ pub async fn handle_listen(mut req: Request, env: &Env, _ctx: &Context) -> Resul
     ok_json(json!({
         "status": "waiting",
         "channel_id": body.channel_id
-    }))
+    }), env)
 }
 
 /// POST /join
@@ -221,25 +231,25 @@ pub async fn handle_join(mut req: Request, env: &Env, _ctx: &Context) -> Result<
 
     let mut meta = match storage::read_meta(&bucket, &body.channel_id).await? {
         Some(m) => m,
-        None => return err_json(404, "channel_not_found", "Channel does not exist."),
+        None => return err_json(404, "channel_not_found", "Channel does not exist.", env),
     };
 
     if now_ms() > meta.expires_at {
-        return err_json(410, "channel_expired", "Channel has expired.");
+        return err_json(410, "channel_expired", "Channel has expired.", env);
     }
 
     if !verify_passcode(&bucket, &body.channel_id, &mut meta, &body.passcode).await? {
         if meta.passcode_attempts >= meta.max_passcode_attempts {
-            return err_json(403, "passcode_locked", "Too many wrong attempts.");
+            return err_json(403, "passcode_locked", "Too many wrong attempts.", env);
         }
-        return err_json(401, "invalid_passcode", "Invalid passcode.");
+        return err_json(401, "invalid_passcode", "Invalid passcode.", env);
     }
 
     if meta.state == storage::STATE_LOCKED {
-        return err_json(403, "channel_locked", "This channel is already in use.");
+        return err_json(403, "channel_locked", "This channel is already in use.", env);
     }
     if meta.state != storage::STATE_WAITING {
-        return err_json(409, "invalid_state", &format!("Channel is in {} state, expected WAITING.", meta.state));
+        return err_json(409, "invalid_state", &format!("Channel is in {} state, expected WAITING.", meta.state), env);
     }
 
     // Store caller signal if provided (opaque)
@@ -264,7 +274,7 @@ pub async fn handle_join(mut req: Request, env: &Env, _ctx: &Context) -> Result<
     ok_json(json!({
         "status": "locked",
         "callee_signal": callee_signal_value
-    }))
+    }), env)
 }
 
 /// POST /poll
@@ -281,37 +291,42 @@ pub async fn handle_poll(mut req: Request, env: &Env, ctx: &Context) -> Result<R
 
     let mut meta = match storage::read_meta(&bucket, &body.channel_id).await? {
         Some(m) => m,
-        None => return err_json(404, "channel_not_found", "Channel does not exist."),
+        None => return err_json(404, "channel_not_found", "Channel does not exist.", env),
     };
 
     if now_ms() > meta.expires_at {
-        return err_json(410, "channel_expired", "Channel has expired.");
+        return err_json(410, "channel_expired", "Channel has expired.", env);
     }
 
     if !verify_passcode(&bucket, &body.channel_id, &mut meta, &body.passcode).await? {
         if meta.passcode_attempts >= meta.max_passcode_attempts {
-            return err_json(403, "passcode_locked", "Too many wrong attempts.");
+            return err_json(403, "passcode_locked", "Too many wrong attempts.", env);
         }
-        return err_json(401, "invalid_passcode", "Invalid passcode.");
+        return err_json(401, "invalid_passcode", "Invalid passcode.", env);
     }
 
     if meta.state == storage::STATE_TERMINATED {
-        return err_json(410, "channel_terminated", "Channel has been terminated.");
+        return err_json(410, "channel_terminated", "Channel has been terminated.", env);
     }
 
     if meta.state == storage::STATE_WAITING {
-        return ok_json(json!({ "status": "waiting" }));
+        return ok_json(json!({ "status": "waiting" }), env);
     }
 
     if meta.state == storage::STATE_LOCKED {
-        // If caller is posting signal, store it
+        // If caller is posting signal, validate and store it
         if body.role == "caller" {
             if let Some(s) = &body.signal {
                 let existing = storage::read_signal(&bucket, &body.channel_id, "caller").await?;
                 if existing.is_none() {
+                    let max_signal_bytes = env_var_usize(env, "MAX_SIGNAL_BYTES", 65536);
+                    if let Some((code, msg)) = validate_signal(s, max_signal_bytes) {
+                        let status = if code == "signal_too_large" { 413 } else { 400 };
+                        return err_json(status, code, msg, env);
+                    }
                     let signal_str = serde_json::to_string(s).unwrap_or_default();
                     storage::write_signal(&bucket, &body.channel_id, "caller", &signal_str).await?;
-                    return ok_json(json!({ "status": "signal_stored" }));
+                    return ok_json(json!({ "status": "signal_stored" }), env);
                 }
             }
         }
@@ -324,10 +339,10 @@ pub async fn handle_poll(mut req: Request, env: &Env, ctx: &Context) -> Result<R
             "status": "locked",
             "state": "LOCKED",
             "caller_signal": caller_signal_value
-        }));
+        }), env);
     }
 
-    ok_json(json!({ "status": meta.state }))
+    ok_json(json!({ "status": meta.state }), env)
 }
 
 /// POST /hangup
@@ -337,14 +352,14 @@ pub async fn handle_hangup(mut req: Request, env: &Env, ctx: &Context) -> Result
 
     let mut meta = match storage::read_meta(&bucket, &body.channel_id).await? {
         Some(m) => m,
-        None => return err_json(404, "channel_not_found", "Channel does not exist."),
+        None => return err_json(404, "channel_not_found", "Channel does not exist.", env),
     };
 
     if !verify_passcode(&bucket, &body.channel_id, &mut meta, &body.passcode).await? {
         if meta.passcode_attempts >= meta.max_passcode_attempts {
-            return err_json(403, "passcode_locked", "Too many wrong attempts.");
+            return err_json(403, "passcode_locked", "Too many wrong attempts.", env);
         }
-        return err_json(401, "invalid_passcode", "Invalid passcode.");
+        return err_json(401, "invalid_passcode", "Invalid passcode.", env);
     }
 
     // Transition → TERMINATED
@@ -359,21 +374,65 @@ pub async fn handle_hangup(mut req: Request, env: &Env, ctx: &Context) -> Result
         storage::delete_channel(&bucket_for_cleanup, &channel_id).await.ok();
     });
 
-    ok_json(json!({ "status": "terminated" }))
+    ok_json(json!({ "status": "terminated" }), env)
 }
 
 /// GET /
-pub async fn handle_health(_env: &Env) -> Result<Response> {
+pub async fn handle_health(env: &Env) -> Result<Response> {
     let body = json!({ "status": "ok", "service": "zrtc" });
-    ok_json(body)
+    ok_json(body, env)
 }
 
 /// OPTIONS *
-pub fn handle_options() -> Result<Response> {
+pub fn handle_options(env: &Env) -> Result<Response> {
+    let origin = allowed_origin(env);
     let headers = Headers::new();
-    headers.set("Access-Control-Allow-Origin", "*")?;
-    headers.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")?;
+    headers.set("Access-Control-Allow-Origin", &origin)?;
+    headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")?;
     headers.set("Access-Control-Allow-Headers", "Content-Type")?;
     headers.set("Access-Control-Max-Age", "86400")?;
-    Ok(Response::empty()?.with_headers(headers))
+    Ok(Response::builder()
+        .with_status(204)
+        .with_headers(headers)
+        .body(worker::ResponseBody::Empty)
+    )
+}
+
+// ── Signal Validation ───────────────────────────────────
+
+/// Validate a signal payload before storing it in R2.
+/// Returns Some((error_code, message)) on failure, None on success.
+fn validate_signal(signal: &serde_json::Value, max_bytes: usize) -> Option<(&'static str, &'static str)> {
+    // Must be a JSON object
+    let obj = match signal.as_object() {
+        Some(o) => o,
+        None => return Some(("invalid_signal", "Signal must be a JSON object.")),
+    };
+
+    // Check byte size (re-serialize to get exact byte count)
+    let serialized = serde_json::to_string(signal).unwrap_or_default();
+    if serialized.len() > max_bytes {
+        return Some(("signal_too_large", "Signal payload exceeds maximum allowed size."));
+    }
+
+    // Must match SDP descriptor or ICE candidate shape
+    let is_sdp = obj.get("type")
+        .and_then(|t| t.as_str())
+        .map(|t| matches!(t, "offer" | "answer" | "pranswer"))
+        .unwrap_or(false)
+        && obj.get("sdp")
+            .and_then(|s| s.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+
+    let is_ice = obj.get("candidate")
+        .and_then(|c| c.as_str())
+        .map(|c| !c.is_empty())
+        .unwrap_or(false);
+
+    if !is_sdp && !is_ice {
+        return Some(("invalid_signal", "Signal must be a WebRTC SDP descriptor or ICE candidate."));
+    }
+
+    None
 }

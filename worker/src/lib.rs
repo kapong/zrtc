@@ -12,7 +12,7 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     // CORS preflight
     if method == Method::Options {
-        return handlers::handle_options();
+        return handlers::handle_options(&env);
     }
 
     // Health check

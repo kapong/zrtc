@@ -37,11 +37,7 @@ const turnCredential = ref('')
 
 // Channel config (require / additional)
 const cfgBandwidth = ref('2M')
-const cfgRatio = ref('16:9')
-const cfgWidth = ref(720)
 const cfgBandwidthEnabled = ref(true)
-const cfgRatioEnabled = ref(true)
-const cfgWidthEnabled = ref(true)
 
 // Connection state
 const messages = ref([])
@@ -91,10 +87,13 @@ function loadTurnFromStorage () {
   } catch {}
 }
 
-async function requestMedia () {
+async function requestMedia (width, height) {
   try {
     mediaError.value = ''
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    const videoConstraints = (width && height)
+      ? { width: { ideal: width }, height: { ideal: height } }
+      : true
+    const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: true })
     localStream.value = stream
     mediaReady.value = true
     // Attach to video element after next tick
@@ -103,11 +102,18 @@ async function requestMedia () {
         localVideo.value.srcObject = stream
       }
     }, 50)
+    const vt = stream.getVideoTracks()[0]
+    if (vt) {
+      const s = vt.getSettings()
+      console.log(`[App] Acquired video: ${s.width}×${s.height}`)
+    }
+    return stream
   } catch (err) {
     mediaError.value = err.name === 'NotAllowedError'
       ? 'Camera/microphone permission denied. Please allow access and try again.'
       : `Media error: ${err.message}`
     mediaReady.value = false
+    throw err
   }
 }
 
@@ -161,6 +167,8 @@ function wireEvents () {
         remoteVideo.value.srcObject = remoteStream.value
       }
     }, 50)
+    // Apply bitrate limit from require config
+    applyBitrateLimit()
     startStats()
   })
   call.on('stream', (stream) => {
@@ -202,32 +210,31 @@ async function createCall () {
     status.value = 'creating'
     statusText.value = 'Creating channel...'
     errorText.value = ''
-
-    call = new ZeroRTC({
-      workerUrl: WORKER_URL,
-      localStream: localStream.value || undefined,
-      turnIceServers: turnUrl.value ? [{
-        urls: turnUrl.value,
-        username: turnUsername.value || undefined,
-        credential: turnCredential.value || undefined
-      }] : undefined
-    })
     saveTurnToStorage()
-    console.log('[App] createCall turnIceServers:', JSON.stringify(call.turnIceServers))
-    wireEvents()
 
     // Build require / additional config for the channel
     const bandwidthMap = { '1M': 1000000, '2M': 2000000, '3M': 3000000, '4M': 4000000, '5M': 5000000, '10M': 10000000 }
     const requireConfig = {}
-    if (cfgBandwidthEnabled.value) requireConfig.max_bitrate = bandwidthMap[cfgBandwidth.value] || 2000000
-    if (cfgRatioEnabled.value) requireConfig.video_output_ratio = cfgRatio.value
-    if (cfgWidthEnabled.value) requireConfig.video_output_width = cfgWidth.value
+    if (cfgBandwidthEnabled.value) {
+      requireConfig.max_bitrate = bandwidthMap[cfgBandwidth.value] || 2000000
+    }
     const additionalConfig = {}
     if (turnUrl.value) {
       additionalConfig.turn = { urls: turnUrl.value }
       if (turnUsername.value) additionalConfig.turn.username = turnUsername.value
       if (turnCredential.value) additionalConfig.turn.credential = turnCredential.value
     }
+
+    // 1. Create channel first to get URL/QR
+    call = new ZeroRTC({
+      workerUrl: WORKER_URL,
+      turnIceServers: turnUrl.value ? [{
+        urls: turnUrl.value,
+        username: turnUsername.value || undefined,
+        credential: turnCredential.value || undefined
+      }] : undefined
+    })
+    wireEvents()
 
     const creds = await call.create({
       require: Object.keys(requireConfig).length ? requireConfig : undefined,
@@ -236,19 +243,20 @@ async function createCall () {
     channelId.value = creds.channelId
     passcode.value = creds.passcode
 
-    // Apply video constraints from config before SDP offer
-    await applyVideoConfig(cfgWidth.value, cfgRatio.value, cfgWidthEnabled.value && cfgRatioEnabled.value)
-
-    status.value = 'waiting'
-    statusText.value = 'Scan the QR code or share the link below'
-
-    // Generate join URL and QR code (TURN is shared via channel config, not URL)
+    // Generate join URL and QR code
     const hash = `${creds.channelId}/${creds.passcode}`
     const url = `${window.location.origin}${window.location.pathname}#${hash}`
     joinUrl.value = url
     qrDataUrl.value = await QRCode.toDataURL(url, { width: 256, margin: 2, color: { dark: '#000', light: '#fff' } })
 
-    // listen() will resolve when caller joins and WebRTC connects
+    status.value = 'waiting'
+    statusText.value = 'Scan the QR code or share the link below'
+
+    // 2. Request media
+    await requestMedia()
+    call.localStream = localStream.value
+
+    // 3. listen() — generates SDP with the correct resolution track
     await call.listen()
   } catch (err) {
     errorText.value = err.message || String(err)
@@ -267,23 +275,33 @@ async function joinCall () {
 
     call = new ZeroRTC({
       workerUrl: WORKER_URL,
-      localStream: localStream.value || undefined,
       turnIceServers: turnUrl.value ? [{
         urls: turnUrl.value,
         username: turnUsername.value || undefined,
         credential: turnCredential.value || undefined
       }] : undefined
     })
-    console.log('[App] joinCall turnIceServers:', JSON.stringify(call.turnIceServers))
     wireEvents()
 
-    await call.join(joinChannelId.value, joinPasscode.value)
+    // 1. Join to get callee signal + require config (no WebRTC yet)
+    const joinResult = await call.signaller.join(joinChannelId.value, joinPasscode.value)
+    call.channelId = joinChannelId.value
+    call.passcode = joinPasscode.value
+    call.role = 'caller'
+    call.require = joinResult.require ?? null
+    call.additional = joinResult.additional ?? null
 
-    // Apply video constraints from channel require config
-    const req = call.require
-    if (req && req.video_output_width && req.video_output_ratio) {
-      await applyVideoConfig(req.video_output_width, req.video_output_ratio, true)
+    // Apply TURN from channel config if no local TURN was provided
+    if (call.additional?.turn && !call.turnIceServers) {
+      call.turnIceServers = [call.additional.turn]
     }
+
+    // 2. Request media
+    await requestMedia()
+    call.localStream = localStream.value
+
+    // 3. Do the WebRTC exchange with the correct resolution track
+    await call._doJoin(joinResult)
   } catch (err) {
     errorText.value = err.message || String(err)
     status.value = 'error'
@@ -383,39 +401,25 @@ function toggleFullscreen (el) {
   }
 }
 
-async function applyVideoConfig (width, ratio, enabled) {
-  if (!enabled || !localStream.value) return
-  const ratioMap = { '16:9': [16, 9], '4:3': [4, 3], '1:1': [1, 1], '3:4': [3, 4], '9:16': [9, 16] }
-  const [rw, rh] = ratioMap[ratio] || [16, 9]
-  const w = Number(width)
-  const h = Math.round(w * rh / rw)
+async function applyBitrateLimit () {
+  if (!call || !call.pc) return
+  // Callee: use local config; Caller: use channel require config
+  const bandwidthMap = { '1M': 1000000, '2M': 2000000, '3M': 3000000, '4M': 4000000, '5M': 5000000, '10M': 10000000 }
+  const localBitrate = cfgBandwidthEnabled.value
+    ? bandwidthMap[cfgBandwidth.value] : null
+  const bitrate = call.require?.max_bitrate || localBitrate
+  if (!bitrate) return
   try {
-    // Re-acquire camera with exact-ish constraints for reliable resolution
-    const newStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: w, min: w }, height: { ideal: h, min: h } },
-      audio: false
-    })
-    const newVt = newStream.getVideoTracks()[0]
-    const oldVt = localStream.value.getVideoTracks()[0]
-    if (oldVt) {
-      localStream.value.removeTrack(oldVt)
-      oldVt.stop()
+    for (const sender of call.pc.getSenders()) {
+      if (sender.track?.kind !== 'video') continue
+      const params = sender.getParameters()
+      if (!params.encodings?.length) continue
+      params.encodings[0].maxBitrate = bitrate
+      await sender.setParameters(params)
+      console.log(`[App] Set maxBitrate: ${bitrate}`)
     }
-    localStream.value.addTrack(newVt)
-    // Update ZeroRTC's reference
-    if (call) call.localStream = localStream.value
-    // Replace track on existing PeerConnection if already connected
-    if (call && call.pc) {
-      const sender = call.pc.getSenders().find(s => s.track && s.track.kind === 'video')
-      if (sender) await sender.replaceTrack(newVt)
-    }
-    // Update video previews
-    if (localVideo.value) localVideo.value.srcObject = localStream.value
-    if (connectedLocalVideo.value) connectedLocalVideo.value.srcObject = localStream.value
-    const s = newVt.getSettings()
-    console.log(`[App] Re-acquired video: ${s.width}×${s.height} (requested ${w}×${h})`)
   } catch (err) {
-    console.warn('[App] Failed to re-acquire video:', err)
+    console.warn('[App] Failed to set bitrate limit:', err)
   }
 }
 
@@ -491,75 +495,47 @@ onUnmounted(() => {
       Create a channel and share the credentials with the caller.
     </p>
 
-    <!-- Media permission -->
-    <div v-if="!mediaReady" class="media-prompt">
-      <p>Allow camera &amp; microphone access to start a call.</p>
-      <button class="primary" @click="requestMedia">Allow Camera &amp; Mic</button>
-      <div v-if="mediaError" class="status error" style="margin-top:0.5rem">{{ mediaError }}</div>
+    <!-- TURN override -->
+    <div class="turn-toggle">
+      <a href="#" @click.prevent="showTurnOverride = !showTurnOverride" style="color:#4a9eff; font-size:0.85rem;">
+        {{ showTurnOverride ? '▾ Hide' : '▸ Override' }} TURN Server
+      </a>
     </div>
-    <div v-else class="media-preview">
-      <video ref="localVideo" autoplay muted playsinline class="local-video"></video>
-
-      <!-- TURN override -->
-      <div class="turn-toggle" style="margin-top:0.75rem;">
-        <a href="#" @click.prevent="showTurnOverride = !showTurnOverride" style="color:#4a9eff; font-size:0.85rem;">
-          {{ showTurnOverride ? '▾ Hide' : '▸ Override' }} TURN Server
-        </a>
+    <div v-if="showTurnOverride" class="turn-fields">
+      <div class="field">
+        <label>TURN URL</label>
+        <input v-model="turnUrl" placeholder="turn:relay.example.com:3478" />
       </div>
-      <div v-if="showTurnOverride" class="turn-fields">
-        <div class="field">
-          <label>TURN URL</label>
-          <input v-model="turnUrl" placeholder="turn:relay.example.com:3478" />
-        </div>
-        <div class="field">
-          <label>Username</label>
-          <input v-model="turnUsername" placeholder="(optional)" />
-        </div>
-        <div class="field">
-          <label>Credential</label>
-          <input v-model="turnCredential" placeholder="(optional)" type="password" />
-        </div>
+      <div class="field">
+        <label>Username</label>
+        <input v-model="turnUsername" placeholder="(optional)" />
       </div>
-
-      <!-- Channel config -->
-      <div class="config-section" style="margin-top:0.75rem;">
-        <div class="config-row">
-          <div class="field">
-            <label><input type="checkbox" v-model="cfgBandwidthEnabled" /> Max Bandwidth</label>
-            <select v-model="cfgBandwidth" :disabled="!cfgBandwidthEnabled">
-              <option>1M</option>
-              <option>2M</option>
-              <option>3M</option>
-              <option>4M</option>
-              <option>5M</option>
-              <option>10M</option>
-            </select>
-          </div>
-          <div class="field">
-            <label><input type="checkbox" v-model="cfgRatioEnabled" /> Output Ratio</label>
-            <select v-model="cfgRatio" :disabled="!cfgRatioEnabled">
-              <option>16:9</option>
-              <option>4:3</option>
-              <option>1:1</option>
-              <option>3:4</option>
-              <option>9:16</option>
-            </select>
-          </div>
-          <div class="field">
-            <label><input type="checkbox" v-model="cfgWidthEnabled" /> Output Width</label>
-            <select v-model="cfgWidth" :value="cfgWidth" :disabled="!cfgWidthEnabled">
-              <option :value="480">480p</option>
-              <option :value="640">640p</option>
-              <option :value="720">720p</option>
-              <option :value="1080">1080p</option>
-              <option :value="1920">1920p</option>
-            </select>
-          </div>
-        </div>
+      <div class="field">
+        <label>Credential</label>
+        <input v-model="turnCredential" placeholder="(optional)" type="password" />
       </div>
-
-      <button class="primary" @click="createCall" style="margin-top:0.75rem">Create Call</button>
     </div>
+
+    <!-- Channel config -->
+    <div class="config-section" style="margin-top:0.75rem;">
+      <div class="config-row">
+        <div class="field">
+          <label><input type="checkbox" v-model="cfgBandwidthEnabled" /> Max Bandwidth</label>
+          <select v-model="cfgBandwidth" :disabled="!cfgBandwidthEnabled">
+            <option>1M</option>
+            <option>2M</option>
+            <option>3M</option>
+            <option>4M</option>
+            <option>5M</option>
+            <option>10M</option>
+          </select>
+        </div>
+
+      </div>
+    </div>
+
+    <div v-if="mediaError" class="status error" style="margin-top:0.5rem">{{ mediaError }}</div>
+    <button class="primary" @click="createCall" style="margin-top:0.75rem">Create Call</button>
   </div>
 
   <!-- Callee: waiting -->
@@ -586,6 +562,10 @@ onUnmounted(() => {
         <label>Passcode</label>
         <div class="credential">{{ passcode }}</div>
       </div>
+
+      <div v-if="mediaReady" class="media-preview" style="margin-top:1rem">
+        <video ref="localVideo" autoplay muted playsinline class="local-video"></video>
+      </div>
     </template>
 
     <div v-else class="connection-progress">
@@ -607,24 +587,15 @@ onUnmounted(() => {
       <label>Passcode</label>
       <input v-model="joinPasscode" placeholder="e.g. 9876" />
     </div>
-
-    <!-- Media permission -->
-    <div v-if="!mediaReady" class="media-prompt">
-      <p>Allow camera &amp; microphone access to join the call.</p>
-      <button class="primary" @click="requestMedia">Allow Camera &amp; Mic</button>
-      <div v-if="mediaError" class="status error" style="margin-top:0.5rem">{{ mediaError }}</div>
-    </div>
-    <div v-else class="media-preview">
-      <video ref="localVideo" autoplay muted playsinline class="local-video"></video>
-      <button
-        class="primary"
-        :disabled="!joinChannelId || !joinPasscode"
-        @click="joinCall"
-        style="margin-top:0.75rem"
-      >
-        Join Call
-      </button>
-    </div>
+    <div v-if="mediaError" class="status error" style="margin-top:0.5rem">{{ mediaError }}</div>
+    <button
+      class="primary"
+      :disabled="!joinChannelId || !joinPasscode"
+      @click="joinCall"
+      style="margin-top:0.75rem"
+    >
+      Join Call
+    </button>
   </div>
 
   <!-- Caller: connecting -->

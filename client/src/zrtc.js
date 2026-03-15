@@ -80,8 +80,6 @@ export class ZeroRTC extends EventEmitter {
     this.passcode = passcode
     this.role = 'caller'
 
-    const dtlsCert = await generateDtlsCert()
-
     // Join without signal — just get callee's signal
     const result = await this.signaller.join(this.channelId, this.passcode)
 
@@ -93,6 +91,13 @@ export class ZeroRTC extends EventEmitter {
     if (this.additional?.turn && !this.turnIceServers) {
       this.turnIceServers = [this.additional.turn]
     }
+
+    await this._doJoin(result)
+  }
+
+  /** Perform the WebRTC exchange given an already-fetched join result. */
+  async _doJoin (result) {
+    const dtlsCert = await generateDtlsCert()
 
     const iceServers = this._iceServers()
     console.log('[ZeroRTC] join() iceServers:', JSON.stringify(iceServers))

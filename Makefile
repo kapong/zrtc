@@ -1,6 +1,6 @@
 .PHONY: help install build deploy clean test \
        worker-build worker-deploy worker-dev worker-clean \
-       client-install client-build client-pack client-publish client-clean \
+       client-install client-build client-pack client-deploy client-clean \
        example-install example-build example-dev example-deploy example-clean \
        test-worker test-client
 
@@ -21,7 +21,7 @@ help: ## Show this help
 # ─── All ─────────────────────────────────────────────────
 install: client-install example-install ## Install all JS deps
 build: worker-build client-build example-build ## Build everything
-deploy: worker-deploy client-publish example-deploy ## Deploy everything
+deploy: worker-deploy client-deploy example-deploy ## Deploy everything
 clean: worker-clean client-clean example-clean ## Clean all build artifacts
 test: test-client test-worker ## Run all tests
 
@@ -48,8 +48,13 @@ client-build: client-install ## Build client library
 client-pack: client-build ## Dry-run npm pack (check what gets published)
 	cd $(CLIENT_DIR) && npm pack --dry-run
 
-client-publish: client-build ## Publish client to npm
-	cd $(CLIENT_DIR) && npm publish --access public
+client-deploy: ## Bump patch version, commit, tag, push (triggers GitHub Actions)
+	@cd $(CLIENT_DIR) && npm version patch --no-git-tag-version; \
+	VERSION=$$(node -p "require('./package.json').version"); \
+	TAG="v$$VERSION"; \
+	cd .. && git add $(CLIENT_DIR)/package.json && git commit -m "release: $$TAG" && \
+	git tag "$$TAG" && git push origin HEAD "$$TAG"; \
+	echo "Pushed tag $$TAG — GitHub Actions will publish to npm."
 
 client-clean: ## Clean client build artifacts
 	rm -rf $(CLIENT_DIR)/dist $(CLIENT_DIR)/node_modules

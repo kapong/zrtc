@@ -20,6 +20,14 @@ pub fn key_caller(channel_id: &str) -> String {
     format!("channels/{}/caller.json", channel_id)
 }
 
+pub fn key_require(channel_id: &str) -> String {
+    format!("channels/{}/require.json", channel_id)
+}
+
+pub fn key_additional(channel_id: &str) -> String {
+    format!("channels/{}/additional.json", channel_id)
+}
+
 /// Get the R2 bucket from env bindings.
 pub fn get_bucket(env: &Env) -> Result<Bucket> {
     env.bucket("BUCKET")
@@ -92,12 +100,36 @@ pub async fn write_signal(
     Ok(())
 }
 
+/// Write an optional config blob to R2 (skip if None).
+pub async fn write_config(bucket: &Bucket, key: &str, value: &Option<serde_json::Value>) -> Result<()> {
+    if let Some(v) = value {
+        let json = serde_json::to_string(v).map_err(|e| worker::Error::RustError(e.to_string()))?;
+        bucket.put(key, json).execute().await?;
+    }
+    Ok(())
+}
+
+/// Read an optional config blob from R2 (returns None if key doesn't exist).
+pub async fn read_config(bucket: &Bucket, key: &str) -> Result<Option<serde_json::Value>> {
+    match bucket.get(key).execute().await? {
+        Some(obj) => {
+            let text = obj.body().expect("body").text().await?;
+            let value: serde_json::Value = serde_json::from_str(&text)
+                .map_err(|e| worker::Error::RustError(e.to_string()))?;
+            Ok(Some(value))
+        }
+        None => Ok(None),
+    }
+}
+
 /// Delete all channel data from R2.
 pub async fn delete_channel(bucket: &Bucket, channel_id: &str) -> Result<()> {
     let keys = vec![
         key_meta(channel_id),
         key_callee(channel_id),
         key_caller(channel_id),
+        key_require(channel_id),
+        key_additional(channel_id),
     ];
     for key in keys {
         bucket.delete(&key).await.ok();

@@ -32,11 +32,17 @@ export class ZeroRTC extends EventEmitter {
     this.signaller = createSignaller({ workerUrl: this.workerUrl })
     this.destroyed = false
     this._pollTimer = null
+    this.require = null
+    this.additional = null
   }
 
   /** Create a new channel (callee side). Returns { channelId, passcode }. */
   async create (options = {}) {
-    const result = await this.signaller.createChannel(options)
+    const { require, additional, ...rest } = options
+    const body = { ...rest }
+    if (require !== undefined) body.require = require
+    if (additional !== undefined) body.additional = additional
+    const result = await this.signaller.createChannel(body)
     this.channelId = result.channel_id
     this.passcode = result.passcode
     this.role = 'callee'
@@ -80,6 +86,11 @@ export class ZeroRTC extends EventEmitter {
 
     // Join without signal — just get callee's signal
     const result = await this.signaller.join(this.channelId, this.passcode)
+
+    // Expose config objects from join response
+    this.require = result.require ?? null
+    this.additional = result.additional ?? null
+
     console.log('[ZeroRTC] join() got callee signal:', {
       ufrag: result.callee_signal?.ice_ufrag,
       candidates: result.callee_signal?.candidates?.length
@@ -151,6 +162,11 @@ export class ZeroRTC extends EventEmitter {
           const result = await this.signaller.poll(this.channelId, this.passcode)
           if (result.state === 'LOCKED' && result.caller_signal) {
             this.emit('joining')
+
+            // Expose config objects from LOCKED poll response
+            this.require = result.require ?? this.require
+            this.additional = result.additional ?? this.additional
+
             console.log('[ZeroRTC] poll() got caller signal:', {
               ufrag: result.caller_signal?.ice_ufrag,
               candidates: result.caller_signal?.candidates?.length

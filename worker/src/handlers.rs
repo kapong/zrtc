@@ -12,6 +12,8 @@ use crate::vacuum;
 pub struct NewChannelRequest {
     pub token_length: Option<usize>,
     pub passcode_length: Option<usize>,
+    pub require: Option<serde_json::Value>,
+    pub additional: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -163,6 +165,10 @@ pub async fn handle_new(
 
     storage::write_meta(&bucket, &channel_id, &meta).await?;
 
+    // Write config blobs if provided
+    storage::write_config(&bucket, &storage::key_require(&channel_id), &body.require).await?;
+    storage::write_config(&bucket, &storage::key_additional(&channel_id), &body.additional).await?;
+
     ok_json(json!({
         "channel_id": channel_id,
         "passcode": passcode,
@@ -271,9 +277,15 @@ pub async fn handle_join(mut req: Request, env: &Env, _ctx: &Context) -> Result<
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or(serde_json::Value::Null);
 
+    // Read config blobs
+    let require = storage::read_config(&bucket, &storage::key_require(&body.channel_id)).await?.unwrap_or(serde_json::Value::Null);
+    let additional = storage::read_config(&bucket, &storage::key_additional(&body.channel_id)).await?.unwrap_or(serde_json::Value::Null);
+
     ok_json(json!({
         "status": "locked",
-        "callee_signal": callee_signal_value
+        "callee_signal": callee_signal_value,
+        "require": require,
+        "additional": additional
     }), env)
 }
 
@@ -335,10 +347,17 @@ pub async fn handle_poll(mut req: Request, env: &Env, ctx: &Context) -> Result<R
         let caller_signal_value: serde_json::Value = caller_signal
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or(serde_json::Value::Null);
+
+        // Read config blobs
+        let require = storage::read_config(&bucket, &storage::key_require(&body.channel_id)).await?.unwrap_or(serde_json::Value::Null);
+        let additional = storage::read_config(&bucket, &storage::key_additional(&body.channel_id)).await?.unwrap_or(serde_json::Value::Null);
+
         return ok_json(json!({
             "status": "locked",
             "state": "LOCKED",
-            "caller_signal": caller_signal_value
+            "caller_signal": caller_signal_value,
+            "require": require,
+            "additional": additional
         }), env);
     }
 

@@ -80,8 +80,6 @@ export class ZeroRTC extends EventEmitter {
     this.passcode = passcode
     this.role = 'caller'
 
-    const iceServers = this._iceServers()
-    console.log('[ZeroRTC] join() iceServers:', JSON.stringify(iceServers))
     const dtlsCert = await generateDtlsCert()
 
     // Join without signal — just get callee's signal
@@ -90,6 +88,14 @@ export class ZeroRTC extends EventEmitter {
     // Expose config objects from join response
     this.require = result.require ?? null
     this.additional = result.additional ?? null
+
+    // Apply TURN from channel config if no local TURN was provided
+    if (this.additional?.turn && !this.turnIceServers) {
+      this.turnIceServers = [this.additional.turn]
+    }
+
+    const iceServers = this._iceServers()
+    console.log('[ZeroRTC] join() iceServers:', JSON.stringify(iceServers))
 
     console.log('[ZeroRTC] join() got callee signal:', {
       ufrag: result.callee_signal?.ice_ufrag,

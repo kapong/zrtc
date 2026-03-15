@@ -35,6 +35,14 @@ const turnUrl = ref('')
 const turnUsername = ref('')
 const turnCredential = ref('')
 
+// Channel config (require / additional)
+const cfgBandwidth = ref('2M')
+const cfgRatio = ref('16:9')
+const cfgWidth = ref(720)
+const cfgBandwidthEnabled = ref(true)
+const cfgRatioEnabled = ref(true)
+const cfgWidthEnabled = ref(true)
+
 // Connection state
 const messages = ref([])
 const msgInput = ref('')
@@ -47,31 +55,17 @@ let call = null
 const peerJoining = ref(false)
 const callEnded = ref(false)
 
-// Encode TURN config to URL-safe base64
-function encodeTurn () {
-  if (!turnUrl.value) return ''
-  const obj = { u: turnUrl.value }
-  if (turnUsername.value) obj.n = turnUsername.value
-  if (turnCredential.value) obj.c = turnCredential.value
-  return btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
+// Video stats
+const localRes = ref('')
+const remoteRes = ref('')
+const sendBitrate = ref('')
+const recvBitrate = ref('')
+let statsTimer = null
+let prevBytesSent = 0
+let prevBytesRecv = 0
+let prevStatsTime = 0
 
-// Decode TURN config from URL-safe base64
-function decodeTurn (s) {
-  if (!s) return null
-  try {
-    const b64 = s.replace(/-/g, '+').replace(/_/g, '/')
-    const obj = JSON.parse(atob(b64))
-    if (!obj.u) return null
-    const server = { urls: obj.u }
-    if (obj.n) server.username = obj.n
-    if (obj.c) server.credential = obj.c
-    return [server]
-  } catch { return null }
-}
 
-// Parsed TURN from URL (for caller)
-let urlTurnServers = null
 
 // localStorage helpers for TURN
 function saveTurnToStorage () {
@@ -167,6 +161,7 @@ function wireEvents () {
         remoteVideo.value.srcObject = remoteStream.value
       }
     }, 50)
+    startStats()
   })
   call.on('stream', (stream) => {
     console.log('[App] Remote stream received, tracks:', stream.getTracks().length)
@@ -221,18 +216,34 @@ async function createCall () {
     console.log('[App] createCall turnIceServers:', JSON.stringify(call.turnIceServers))
     wireEvents()
 
-    const creds = await call.create()
+    // Build require / additional config for the channel
+    const bandwidthMap = { '1M': 1000000, '2M': 2000000, '3M': 3000000, '4M': 4000000, '5M': 5000000, '10M': 10000000 }
+    const requireConfig = {}
+    if (cfgBandwidthEnabled.value) requireConfig.max_bitrate = bandwidthMap[cfgBandwidth.value] || 2000000
+    if (cfgRatioEnabled.value) requireConfig.video_output_ratio = cfgRatio.value
+    if (cfgWidthEnabled.value) requireConfig.video_output_width = cfgWidth.value
+    const additionalConfig = {}
+    if (turnUrl.value) {
+      additionalConfig.turn = { urls: turnUrl.value }
+      if (turnUsername.value) additionalConfig.turn.username = turnUsername.value
+      if (turnCredential.value) additionalConfig.turn.credential = turnCredential.value
+    }
+
+    const creds = await call.create({
+      require: Object.keys(requireConfig).length ? requireConfig : undefined,
+      additional: Object.keys(additionalConfig).length ? additionalConfig : undefined
+    })
     channelId.value = creds.channelId
     passcode.value = creds.passcode
+
+    // Apply video constraints from config before SDP offer
+    await applyVideoConfig(cfgWidth.value, cfgRatio.value, cfgWidthEnabled.value && cfgRatioEnabled.value)
 
     status.value = 'waiting'
     statusText.value = 'Scan the QR code or share the link below'
 
-    // Generate join URL and QR code (include TURN if set)
-    const turnPart = encodeTurn()
-    const hash = turnPart
-      ? `${creds.channelId}/${creds.passcode}/${turnPart}`
-      : `${creds.channelId}/${creds.passcode}`
+    // Generate join URL and QR code (TURN is shared via channel config, not URL)
+    const hash = `${creds.channelId}/${creds.passcode}`
     const url = `${window.location.origin}${window.location.pathname}#${hash}`
     joinUrl.value = url
     qrDataUrl.value = await QRCode.toDataURL(url, { width: 256, margin: 2, color: { dark: '#000', light: '#fff' } })
@@ -257,17 +268,22 @@ async function joinCall () {
     call = new ZeroRTC({
       workerUrl: WORKER_URL,
       localStream: localStream.value || undefined,
-      turnIceServers: urlTurnServers || (turnUrl.value ? [{
+      turnIceServers: turnUrl.value ? [{
         urls: turnUrl.value,
         username: turnUsername.value || undefined,
         credential: turnCredential.value || undefined
-      }] : undefined)
+      }] : undefined
     })
-    console.log('[App] joinCall urlTurnServers:', JSON.stringify(urlTurnServers))
     console.log('[App] joinCall turnIceServers:', JSON.stringify(call.turnIceServers))
     wireEvents()
 
     await call.join(joinChannelId.value, joinPasscode.value)
+
+    // Apply video constraints from channel require config
+    const req = call.require
+    if (req && req.video_output_width && req.video_output_ratio) {
+      await applyVideoConfig(req.video_output_width, req.video_output_ratio, true)
+    }
   } catch (err) {
     errorText.value = err.message || String(err)
     status.value = 'error'
@@ -283,6 +299,7 @@ function sendMessage () {
 }
 
 function hangup () {
+  stopStats()
   if (call) {
     call.hangup()
     call = null
@@ -292,6 +309,114 @@ function hangup () {
   callEnded.value = true
   status.value = 'ended'
   statusText.value = ''
+}
+
+function formatBitrate (bps) {
+  if (bps >= 1000000) return (bps / 1000000).toFixed(1) + ' Mbps'
+  if (bps >= 1000) return (bps / 1000).toFixed(0) + ' kbps'
+  return bps + ' bps'
+}
+
+function startStats () {
+  prevBytesSent = 0
+  prevBytesRecv = 0
+  prevStatsTime = Date.now()
+  statsTimer = setInterval(async () => {
+    // Local resolution from video track settings
+    if (localStream.value) {
+      const vt = localStream.value.getVideoTracks()[0]
+      if (vt) {
+        const s = vt.getSettings()
+        if (s.width && s.height) localRes.value = `${s.width}×${s.height}`
+      }
+    }
+    // Remote resolution from video element
+    if (remoteVideo.value) {
+      const w = remoteVideo.value.videoWidth
+      const h = remoteVideo.value.videoHeight
+      if (w && h) remoteRes.value = `${w}×${h}`
+    }
+    // Bitrate from RTCPeerConnection stats
+    if (!call || !call.pc) return
+    try {
+      const stats = await call.pc.getStats()
+      const now = Date.now()
+      const elapsed = (now - prevStatsTime) / 1000
+      if (elapsed <= 0) return
+      let totalSent = 0
+      let totalRecv = 0
+      stats.forEach(report => {
+        const isVideo = report.kind === 'video' || report.mediaType === 'video'
+        if (report.type === 'outbound-rtp' && isVideo) {
+          totalSent += report.bytesSent || 0
+        }
+        if (report.type === 'inbound-rtp' && isVideo) {
+          totalRecv += report.bytesReceived || 0
+        }
+      })
+      if (prevBytesSent > 0) {
+        sendBitrate.value = formatBitrate(((totalSent - prevBytesSent) * 8) / elapsed)
+      }
+      if (prevBytesRecv > 0) {
+        recvBitrate.value = formatBitrate(((totalRecv - prevBytesRecv) * 8) / elapsed)
+      }
+      prevBytesSent = totalSent
+      prevBytesRecv = totalRecv
+      prevStatsTime = now
+    } catch {}
+  }, 1000)
+}
+
+function stopStats () {
+  if (statsTimer) { clearInterval(statsTimer); statsTimer = null }
+  localRes.value = ''
+  remoteRes.value = ''
+  sendBitrate.value = ''
+  recvBitrate.value = ''
+}
+
+function toggleFullscreen (el) {
+  if (document.fullscreenElement === el) {
+    document.exitFullscreen()
+  } else {
+    el.requestFullscreen().catch(() => {})
+  }
+}
+
+async function applyVideoConfig (width, ratio, enabled) {
+  if (!enabled || !localStream.value) return
+  const ratioMap = { '16:9': [16, 9], '4:3': [4, 3], '1:1': [1, 1], '3:4': [3, 4], '9:16': [9, 16] }
+  const [rw, rh] = ratioMap[ratio] || [16, 9]
+  const w = Number(width)
+  const h = Math.round(w * rh / rw)
+  try {
+    // Re-acquire camera with exact-ish constraints for reliable resolution
+    const newStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: w, min: w }, height: { ideal: h, min: h } },
+      audio: false
+    })
+    const newVt = newStream.getVideoTracks()[0]
+    const oldVt = localStream.value.getVideoTracks()[0]
+    if (oldVt) {
+      localStream.value.removeTrack(oldVt)
+      oldVt.stop()
+    }
+    localStream.value.addTrack(newVt)
+    // Update ZeroRTC's reference
+    if (call) call.localStream = localStream.value
+    // Replace track on existing PeerConnection if already connected
+    if (call && call.pc) {
+      const sender = call.pc.getSenders().find(s => s.track && s.track.kind === 'video')
+      if (sender) await sender.replaceTrack(newVt)
+    }
+    // Update video previews
+    if (localVideo.value) localVideo.value.srcObject = localStream.value
+    if (connectedLocalVideo.value) connectedLocalVideo.value.srcObject = localStream.value
+    const s = newVt.getSettings()
+    console.log(`[App] Re-acquired video: ${s.width}×${s.height} (requested ${w}×${h})`)
+  } catch (err) {
+    console.warn('[App] Failed to re-acquire video:', err)
+  }
 }
 
 function startNew () {
@@ -330,31 +455,6 @@ onMounted(() => {
   // Load saved TURN settings from localStorage
   loadTurnFromStorage()
 
-  // Check ?t= query param for TURN override (applies to any mode)
-  const params = new URLSearchParams(window.location.search)
-  const tParam = params.get('t')
-  if (tParam) {
-    const decoded = decodeTurn(tParam)
-    if (decoded) {
-      urlTurnServers = decoded
-      // Also fill in the TURN fields for visibility
-      const b64 = tParam.replace(/-/g, '+').replace(/_/g, '/')
-      try {
-        const obj = JSON.parse(atob(b64))
-        if (obj.u) turnUrl.value = obj.u
-        if (obj.n) turnUsername.value = obj.n
-        if (obj.c) turnCredential.value = obj.c
-        saveTurnToStorage()
-      } catch {}
-      console.log('[App] Decoded TURN from ?t= param:', JSON.stringify(urlTurnServers))
-    }
-    // Strip ?t= from URL
-    params.delete('t')
-    const qs = params.toString()
-    const clean = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
-    history.replaceState(null, '', clean)
-  }
-
   const hash = window.location.hash.slice(1)
   if (hash && hash.includes('/')) {
     const parts = hash.split('/')
@@ -363,11 +463,6 @@ onMounted(() => {
       joinChannelId.value = id
       joinPasscode.value = code
       mode.value = 'caller'
-      // Parse TURN from 3rd segment if present
-      if (parts[2]) {
-        urlTurnServers = decodeTurn(parts[2])
-        console.log('[App] Decoded TURN from URL:', JSON.stringify(urlTurnServers))
-      }
       // Clear hash so it doesn't persist
       history.replaceState(null, '', window.location.pathname)
     }
@@ -423,6 +518,43 @@ onUnmounted(() => {
         <div class="field">
           <label>Credential</label>
           <input v-model="turnCredential" placeholder="(optional)" type="password" />
+        </div>
+      </div>
+
+      <!-- Channel config -->
+      <div class="config-section" style="margin-top:0.75rem;">
+        <div class="config-row">
+          <div class="field">
+            <label><input type="checkbox" v-model="cfgBandwidthEnabled" /> Max Bandwidth</label>
+            <select v-model="cfgBandwidth" :disabled="!cfgBandwidthEnabled">
+              <option>1M</option>
+              <option>2M</option>
+              <option>3M</option>
+              <option>4M</option>
+              <option>5M</option>
+              <option>10M</option>
+            </select>
+          </div>
+          <div class="field">
+            <label><input type="checkbox" v-model="cfgRatioEnabled" /> Output Ratio</label>
+            <select v-model="cfgRatio" :disabled="!cfgRatioEnabled">
+              <option>16:9</option>
+              <option>4:3</option>
+              <option>1:1</option>
+              <option>3:4</option>
+              <option>9:16</option>
+            </select>
+          </div>
+          <div class="field">
+            <label><input type="checkbox" v-model="cfgWidthEnabled" /> Output Width</label>
+            <select v-model="cfgWidth" :value="cfgWidth" :disabled="!cfgWidthEnabled">
+              <option :value="480">480p</option>
+              <option :value="640">640p</option>
+              <option :value="720">720p</option>
+              <option :value="1080">1080p</option>
+              <option :value="1920">1920p</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -521,13 +653,21 @@ onUnmounted(() => {
   <div v-if="status === 'connected'" class="panel video-panel">
     <h2>Video</h2>
     <div class="video-grid">
-      <div class="video-box">
+      <div class="video-box" @click="toggleFullscreen($event.currentTarget)">
         <video ref="connectedLocalVideo" autoplay muted playsinline class="stream-video"></video>
-        <span class="video-label">You</span>
+        <div class="video-overlay">
+          <span class="video-label">You</span>
+          <span v-if="localRes" class="stat">{{ localRes }}</span>
+          <span v-if="sendBitrate" class="stat">↑ {{ sendBitrate }}</span>
+        </div>
       </div>
-      <div class="video-box">
+      <div class="video-box" @click="toggleFullscreen($event.currentTarget)">
         <video ref="remoteVideo" autoplay playsinline class="stream-video"></video>
-        <span class="video-label">Peer</span>
+        <div class="video-overlay">
+          <span class="video-label">Peer</span>
+          <span v-if="remoteRes" class="stat">{{ remoteRes }}</span>
+          <span v-if="recvBitrate" class="stat">↓ {{ recvBitrate }}</span>
+        </div>
       </div>
     </div>
   </div>

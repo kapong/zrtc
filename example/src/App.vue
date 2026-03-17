@@ -473,7 +473,17 @@ onMounted(() => {
   }
 })
 
+function onBeforeUnload (e) {
+  if (call && ['creating', 'waiting', 'joining', 'connected'].includes(status.value)) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
+}
+
+window.addEventListener('beforeunload', onBeforeUnload)
+
 onUnmounted(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload)
   if (call) call.hangup()
   stopMedia()
 })

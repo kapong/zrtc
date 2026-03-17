@@ -30,7 +30,7 @@ const qrDataUrl = ref('')
 const joinUrl = ref('')
 
 // TURN override
-const showTurnOverride = ref(false)
+const turnEnabled = ref(false)
 const turnUrl = ref('')
 const turnUsername = ref('')
 const turnCredential = ref('')
@@ -66,6 +66,7 @@ let prevStatsTime = 0
 // localStorage helpers for TURN
 function saveTurnToStorage () {
   const obj = {}
+  obj.e = turnEnabled.value
   if (turnUrl.value) obj.u = turnUrl.value
   if (turnUsername.value) obj.n = turnUsername.value
   if (turnCredential.value) obj.c = turnCredential.value
@@ -81,6 +82,7 @@ function loadTurnFromStorage () {
     const raw = localStorage.getItem('zrtc_turn')
     if (!raw) return
     const obj = JSON.parse(raw)
+    if (obj.e !== undefined) turnEnabled.value = obj.e
     if (obj.u) turnUrl.value = obj.u
     if (obj.n) turnUsername.value = obj.n
     if (obj.c) turnCredential.value = obj.c
@@ -219,7 +221,8 @@ async function createCall () {
       requireConfig.max_bitrate = bandwidthMap[cfgBandwidth.value] || 2000000
     }
     const additionalConfig = {}
-    if (turnUrl.value) {
+    const useTurn = turnEnabled.value && turnUrl.value
+    if (useTurn) {
       additionalConfig.turn = { urls: turnUrl.value }
       if (turnUsername.value) additionalConfig.turn.username = turnUsername.value
       if (turnCredential.value) additionalConfig.turn.credential = turnCredential.value
@@ -228,7 +231,7 @@ async function createCall () {
     // 1. Create channel first to get URL/QR
     call = new ZeroRTC({
       workerUrl: WORKER_URL,
-      turnIceServers: turnUrl.value ? [{
+      turnIceServers: useTurn ? [{
         urls: turnUrl.value,
         username: turnUsername.value || undefined,
         credential: turnCredential.value || undefined
@@ -275,7 +278,7 @@ async function joinCall () {
 
     call = new ZeroRTC({
       workerUrl: WORKER_URL,
-      turnIceServers: turnUrl.value ? [{
+      turnIceServers: (turnEnabled.value && turnUrl.value) ? [{
         urls: turnUrl.value,
         username: turnUsername.value || undefined,
         credential: turnCredential.value || undefined
@@ -500,37 +503,20 @@ onUnmounted(() => {
 
   <!-- Callee: create -->
   <div v-if="mode === 'callee' && status === 'idle'" class="panel">
+    <a href="#" @click.prevent="mode = null" class="back-link">← Back</a>
     <h2>Create a new call</h2>
     <p style="color:#888; margin-bottom:1rem;">
       Create a channel and share the credentials with the caller.
     </p>
 
-    <!-- TURN override -->
-    <div class="turn-toggle">
-      <a href="#" @click.prevent="showTurnOverride = !showTurnOverride" style="color:#4a9eff; font-size:0.85rem;">
-        {{ showTurnOverride ? '▾ Hide' : '▸ Override' }} TURN Server
-      </a>
-    </div>
-    <div v-if="showTurnOverride" class="turn-fields">
-      <div class="field">
-        <label>TURN URL</label>
-        <input v-model="turnUrl" placeholder="turn:relay.example.com:3478" />
-      </div>
-      <div class="field">
-        <label>Username</label>
-        <input v-model="turnUsername" placeholder="(optional)" />
-      </div>
-      <div class="field">
-        <label>Credential</label>
-        <input v-model="turnCredential" placeholder="(optional)" type="password" />
-      </div>
-    </div>
+    <!-- Settings -->
+    <details class="settings-panel">
+      <summary>Settings</summary>
 
-    <!-- Channel config -->
-    <div class="config-section" style="margin-top:0.75rem;">
-      <div class="config-row">
-        <div class="field">
-          <label><input type="checkbox" v-model="cfgBandwidthEnabled" /> Max Bandwidth</label>
+      <div class="settings-grid">
+        <label class="setting-row">
+          <input type="checkbox" v-model="cfgBandwidthEnabled" />
+          <span class="setting-label">Max Bandwidth</span>
           <select v-model="cfgBandwidth" :disabled="!cfgBandwidthEnabled">
             <option>1M</option>
             <option>2M</option>
@@ -539,9 +525,31 @@ onUnmounted(() => {
             <option>5M</option>
             <option>10M</option>
           </select>
-        </div>
+        </label>
 
+        <label class="setting-row">
+          <input type="checkbox" v-model="turnEnabled" />
+          <span class="setting-label">TURN Server</span>
+          <input v-model="turnUrl" placeholder="turn:relay.example.com:3478" :disabled="!turnEnabled" class="setting-input" />
+        </label>
+
+        <div v-if="turnEnabled" class="setting-sub">
+          <label class="setting-row">
+            <span class="setting-label">Username</span>
+            <input v-model="turnUsername" placeholder="(optional)" class="setting-input" />
+          </label>
+          <label class="setting-row">
+            <span class="setting-label">Credential</span>
+            <input v-model="turnCredential" placeholder="(optional)" type="password" class="setting-input" />
+          </label>
+        </div>
       </div>
+    </details>
+
+    <div class="call-summary">
+      <span v-if="turnEnabled && turnUrl">TURN: <b>{{ turnUrl }}</b></span>
+      <span v-else>STUN only</span>
+      <span v-if="cfgBandwidthEnabled"> · {{ cfgBandwidth }}</span>
     </div>
 
     <div v-if="mediaError" class="status error" style="margin-top:0.5rem">{{ mediaError }}</div>
@@ -588,6 +596,7 @@ onUnmounted(() => {
 
   <!-- Caller: join -->
   <div v-if="mode === 'caller' && status === 'idle'" class="panel">
+    <a href="#" @click.prevent="mode = null" class="back-link">← Back</a>
     <h2>Join a call</h2>
     <div class="field">
       <label>Channel ID</label>
@@ -686,13 +695,5 @@ onUnmounted(() => {
     @click="hangup"
   >
     Hang Up
-  </button>
-  <button
-    v-if="mode && status === 'idle'"
-    class="primary"
-    style="margin-top:1rem"
-    @click="mode = null"
-  >
-    ← Back
   </button>
 </template>

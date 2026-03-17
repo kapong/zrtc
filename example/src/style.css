@@ -291,21 +291,123 @@ button.danger:hover {
   background: #2a2a2a;
 }
 
-.turn-toggle {
+.back-link {
+  display: inline-block;
+  font-size: 1rem;
+  color: #888;
+  text-decoration: none;
+  margin-bottom: 2rem;
+}
+
+.back-link:hover {
+  color: #4a9eff;
+}
+
+/* Settings panel */
+.settings-panel {
+  margin-top: 0.75rem;
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #1a1a1a;
+}
+
+.settings-panel summary {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+  color: #4a9eff;
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-panel[open] summary {
+  border-bottom: 1px solid #333;
+}
+
+.settings-grid {
+  padding: 0.6rem 0.8rem;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  font-size: 0.85rem;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.setting-row input[type="checkbox"] {
+  accent-color: #4a9eff;
+  flex-shrink: 0;
+}
+
+.setting-label {
+  white-space: nowrap;
+  min-width: 5.5rem;
+  color: #999;
+  flex-shrink: 0;
+}
+
+.setting-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background: #111;
+  color: #e0e0e0;
+  outline: none;
+}
+
+.setting-input:focus {
+  border-color: #4a9eff;
+}
+
+.setting-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.setting-row select {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background: #111;
+  color: #e0e0e0;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23888' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  padding-right: 1.5rem;
+}
+
+.setting-row select:focus {
+  border-color: #4a9eff;
+}
+
+.setting-row select:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.setting-sub {
+  padding-left: 1.5rem;
+}
+
+.call-summary {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: #666;
   text-align: center;
 }
 
-.turn-fields {
-  width: 100%;
-  margin-top: 0.5rem;
-  padding: 0.75rem;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 6px;
-}
-
-.turn-fields .field {
-  margin-bottom: 0.5rem;
+.call-summary b {
+  color: #4a9eff;
 }
 
 .video-panel {
@@ -381,66 +483,6 @@ button.danger:hover {
 @media (max-width: 480px) {
   .video-grid {
     grid-template-columns: 1fr;
-  }
-}
-
-.turn-fields .field:last-child {
-  margin-bottom: 0;
-}
-
-/* Config section */
-.config-section {
-  width: 100%;
-}
-
-.config-row {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.config-row .field {
-  flex: 1;
-  margin-bottom: 0;
-}
-
-.config-row select,
-.field select {
-  width: 100%;
-  padding: 0.6rem 0.8rem;
-  font-size: 0.9rem;
-  border: 1px solid #333;
-  border-radius: 6px;
-  background: #111;
-  color: #e0e0e0;
-  outline: none;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23888' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.6rem center;
-  padding-right: 2rem;
-}
-
-.config-row select:focus,
-.field select:focus {
-  border-color: #4a9eff;
-}
-
-.config-row select:disabled,
-.field select:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.config-row label input[type="checkbox"] {
-  margin-right: 0.35rem;
-  accent-color: #4a9eff;
-}
-
-@media (max-width: 480px) {
-  .config-row {
-    flex-direction: column;
-    gap: 0.5rem;
   }
 }
 

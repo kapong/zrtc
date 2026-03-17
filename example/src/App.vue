@@ -3,6 +3,9 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { ZeroRTC, generateQRPayload, parseQRPayload } from '../../client/src/index.js'
 import QRCode from 'qrcode'
 
+/* global __GIT_COMMIT__ */
+const gitCommit = __GIT_COMMIT__
+
 // Media state
 const localStream = ref(null)
 const mediaReady = ref(false)
@@ -696,4 +699,6 @@ onUnmounted(() => {
   >
     Hang Up
   </button>
+
+  <div class="git-commit">{{ gitCommit }}</div>
 </template>
